@@ -4,7 +4,7 @@ Real-time fraud scoring with low false positives, drift adaptation and cost-awar
 
 ## Run
 ```bash
-pip install scikit-learn pandas numpy flask joblib
+pip install -r requirements.txt
 python train.py     # generates data, trains, validates, writes artifacts/
 python app.py       # dashboard at http://localhost:5050
 ```
