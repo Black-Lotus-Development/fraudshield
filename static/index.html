@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FraudShield · Fraud operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* Grid: canvas 1440-56 rail = 1384; pad 32 => 1320 content; 3 cols of (1320-2*24)/3=424; 2/3 span = 2*424+24 = 872; half = (1320-24)/2 = 648 */
+:root{--ground:#171719;--surface:#131217;--raised:#212023;--border:#222224;--rule:#1b1a1f;--control:#3a3a3e;
+--text:#fff;--muted:#8a8c92;--accent:#4a8ad6;--positive:#44a282;--negative:#e5566f;--warning:#d9a441;
+--pill-pos-bg:#1b2828;--pill-pos:#5fc39c;--pill-neg-bg:#2c1a20;--pill-neg:#e5566f;--pill-warn-bg:#2a2416;--pill-warn:#d9a441;--pill-neu-bg:#212023;--pill-neu:#bdbdc0;
+--gap:24px;--pad:32px;--rail:56px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ground);color:var(--text)}
+body{font:400 13px/1.5 "Public Sans",Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums;display:grid;grid-template-columns:var(--rail) 1fr;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+/* rail */
+.rail{position:sticky;top:0;height:100vh;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:4px}
+.mark{width:30px;height:30px;margin-bottom:14px;display:block}
+.rail button{width:56px;height:42px;border:0;background:none;color:var(--muted);position:relative;display:grid;place-items:center}
+.rail button:hover{color:var(--text)}
+.rail button[aria-current=page]{color:var(--text)}
+.rail button[aria-current=page]::after{content:"";position:absolute;right:-1px;top:8px;bottom:8px;width:1px;background:var(--accent)}
+.rail svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.rail .sp{flex:1}
+.rail .tip{position:absolute;left:52px;background:var(--raised);color:var(--text);padding:3px 8px;border-radius:4px;font-size:12px;white-space:nowrap;display:none;z-index:5}
+.rail button:hover .tip,.rail button:focus-visible .tip{display:block}
+/* canvas */
+main{padding:28px var(--pad) 56px;min-width:0}
+.view{display:none}.view.on{display:block}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--gap);margin-bottom:20px;flex-wrap:wrap}
+h1{font-size:24px;line-height:1.2;font-weight:600;margin:0}
+.head p{margin:4px 0 0;color:var(--muted);font-size:14px;max-width:760px}
+.head p b{color:var(--text);font-weight:500}
+.head .scope{color:var(--muted);font-size:12px;margin-top:0;display:block;margin-bottom:6px}
+.btn{height:34px;padding:0 16px;border-radius:999px;border:1px solid var(--control);background:none;font-weight:500;transition:background .15s}
+.btn:hover{background:var(--raised)}
+.btn.pri{background:#fff;color:#000;border-color:#fff}.btn.pri:hover{background:#e4e4e6}
+.btn:active{transform:translateY(1px)}
+.card{background:var(--surface);border-radius:6px;padding:20px;box-shadow:0 12px 28px rgba(0,0,0,.2);min-width:0}
+.card h2{font-size:16px;font-weight:600;margin:0 0 2px}
+.card .sub{color:var(--muted);font-size:12px;margin:0 0 14px}
+.grid{display:grid;gap:var(--gap)}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.span2{grid-column:span 2}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* KPI strip: one container split by hairlines */
+.kpis{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;background:var(--surface);border-radius:6px;margin-bottom:var(--gap)}
+.kpi{padding:18px 20px;min-width:0}.kpi+.kpi{border-left:1px solid var(--rule)}
+.kpi .l{color:var(--muted);font-size:13px}.kpi .v{font-size:20px;margin-top:4px}.kpi.lead .v{font-size:32px;line-height:1.15}
+.kpi .v small{font-size:14px;color:var(--muted);margin-left:2px}
+.kpi .d{color:var(--muted);font-size:12px;margin-top:6px}
+.neg{color:var(--negative)}.pos{color:var(--positive)}.mut{color:var(--muted)}
+/* tables & lists */
+table{width:100%;border-collapse:collapse}
+th{font-weight:400;color:var(--muted);font-size:12px;text-align:left;padding:0 10px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:0 10px;height:42px;border-bottom:1px solid var(--rule);white-space:nowrap}
+.r{text-align:right}
+tbody tr:hover{background:#18171b}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;flex:none}
+.p-block{background:var(--pill-neg-bg);color:var(--pill-neg)}.p-review{background:var(--pill-warn-bg);color:var(--pill-warn)}.p-approve{background:var(--pill-pos-bg);color:var(--pill-pos)}.p-neu{background:var(--pill-neu-bg);color:var(--pill-neu)}
+.alerts{list-style:none;margin:0;padding:0}
+.alerts li{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;min-height:52px;border-bottom:1px solid var(--rule)}
+.alerts li:last-child{border:0}
+.alerts b{font-weight:500}.alerts small{display:block;color:var(--muted);font-size:12px}
+.lnk{border:0;background:none;color:var(--text);font-weight:500;padding:4px 0;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--control)}
+/* tabs: 1px accent as wide as label */
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tabs button{border:0;background:none;color:var(--muted);padding:8px 0;position:relative}
+.tabs button[aria-selected=true]{color:var(--text)}
+.tabs button[aria-selected=true]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--accent)}
+/* forms */
+label{display:block;color:var(--muted);font-size:12px;margin:12px 0 4px}
+select,input[type=number]{width:100%;height:34px;background:var(--ground);border:1px solid var(--control);border-radius:6px;color:var(--text);padding:0 10px;font:inherit}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.chip{height:28px;padding:0 12px;border:1px solid var(--control);border-radius:999px;background:none;font-size:12px;color:var(--text)}
+.chip:hover{background:var(--raised)}
+.chk{display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px;margin-top:14px}
+/* score meter */
+.meter{position:relative;height:6px;background:var(--raised);margin:34px 0 8px;border-radius:3px}
+.meter i{position:absolute;top:-5px;width:2px;height:16px;background:var(--text)}
+.meter b{position:absolute;top:-26px;font-weight:400;color:var(--muted);font-size:12px;transform:translateX(-50%)}
+.meter .fill{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+.why{display:grid;grid-template-columns:1fr 120px 54px;gap:12px;align-items:center;height:34px}
+.why .bar{height:4px;background:var(--raised);border-radius:2px}.why .bar div{height:100%;background:#f2f2f3;border-radius:2px}
+.big{font-size:32px;font-weight:500;line-height:1.1}
+.scroll{max-height:520px;overflow:auto}
+canvas{display:block}
+.empty{color:var(--muted);padding:28px 0;text-align:center}
+@media(max-width:1100px){.g3,.g2{grid-template-columns:1fr}.span2{grid-column:auto}.kpis{grid-template-columns:1fr 1fr}.kpi:nth-child(3){border-left:0}.kpi:nth-child(n+3){border-top:1px solid var(--rule)}}
+@media(max-width:760px){
+ body{grid-template-columns:1fr;padding-bottom:58px}
+ .rail{position:fixed;top:auto;bottom:0;left:0;right:0;height:56px;flex-direction:row;justify-content:space-around;border-right:0;border-top:1px solid var(--border);background:var(--ground);z-index:10;padding:0}
+ .rail .mark,.rail .sp,.rail .tip{display:none}
+ .rail button{width:auto;flex:1;height:56px;font-size:10px;gap:2px;align-content:center}
+ .rail button[aria-current=page]::after{right:20%;left:20%;top:auto;bottom:0;width:auto;height:1px}
+ main{padding:20px 16px}.kpis{grid-template-columns:1fr}.kpi+.kpi{border-left:0;border-top:1px solid var(--rule)}.row2{grid-template-columns:1fr}
+ .scroll{overflow-x:auto}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<nav class="rail" aria-label="Main">
+  <svg class="mark" viewBox="0 0 30 30" aria-label="FraudShield"><path d="M15 3 4 7v8c0 6.5 4.6 10.6 11 12 6.4-1.4 11-5.5 11-12V7L15 3Z" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M9.5 15.5h3l2-5 2.5 9 2-4h2" fill="none" stroke="#4a8ad6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <button data-v="overview" aria-current="page" aria-label="Overview"><svg viewBox="0 0 24 24"><path d="M3 12 12 4l9 8M5 10v10h14V10"/></svg><span class="tip">Overview</span></button>
+  <button data-v="queue" aria-label="Alert queue"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="tip">Alert queue</span></button>
+  <button data-v="score" aria-label="Score a payment"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m12 12 4-3"/></svg><span class="tip">Score a payment</span></button>
+  <button data-v="cost" aria-label="Threshold and cost"><svg viewBox="0 0 24 24"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></svg><span class="tip">Threshold and cost</span></button>
+  <button data-v="fair" aria-label="Fairness"><svg viewBox="0 0 24 24"><path d="M12 4v16M6 20h12M5 8h14M5 8l-2.5 6a3 3 0 0 0 5 0L5 8Zm14 0-2.5 6a3 3 0 0 0 5 0L19 8Z"/></svg><span class="tip">Fairness</span></button>
+  <span class="sp"></span>
+</nav>
+
+<main>
+<!-- OVERVIEW -->
+<section class="view on" id="overview">
+  <div class="head"><div><span class="scope">Card payments · 80,000 transactions over 60 days · synthetic data</span><h1>Fraud overview</h1><p id="finding"></p></div><button class="btn pri" id="reviewNext">Review next alert</button></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="grid g3">
+    <div class="card span2"><h2>Fraud caught by typology</h2><p class="sub">Final period, share of fraud flagged at the production threshold. A new pattern appears from day 45.</p>
+      <div style="display:flex;gap:18px;margin-bottom:10px;font-size:12px;color:var(--muted)"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#8a8c92;margin-right:6px"></i>Static model, trained before day 39</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px"></i>Adaptive model, retrained at day 45</span></div>
+      <div style="height:250px"><canvas id="patChart"></canvas></div></div>
+    <div class="card"><h2>Next to review</h2><p class="sub">Highest-risk transactions the adaptive model flagged</p><ul class="alerts" id="alerts"></ul></div>
+    <div class="card span2"><h2>Precision against recall</h2><p class="sub">Adaptive model, final period. Plain accuracy would read 98%+ by approving everything.</p><div style="height:240px"><canvas id="prChart"></canvas></div></div>
+    <div class="card"><h2>What drives the score</h2><p class="sub">Drop in PR-AUC when the feature is shuffled</p><div style="height:240px"><canvas id="impChart"></canvas></div></div>
+  </div>
+</section>
+
+<!-- QUEUE -->
+<section class="view" id="queue">
+  <div class="head"><div><span class="scope">Final-period sample · 200 transactions</span><h1>Alert queue</h1><p id="qsub">Replay the stream and watch both models decide on each payment.</p></div>
+    <div style="display:flex;gap:10px"><button class="btn" id="reset">Reset</button><button class="btn pri" id="play">Start replay</button></div></div>
+  <div class="card">
+    <div class="tabs" role="tablist" id="qtabs"><button role="tab" aria-selected="true" data-f="all">All</button><button role="tab" aria-selected="false" data-f="fraud">Confirmed fraud</button><button role="tab" aria-selected="false" data-f="missed">Missed by static model</button></div>
+    <div class="scroll"><table><thead><tr><th>Transaction</th><th class="r">Amount</th><th>Merchant</th><th>Channel</th><th>Country</th><th class="r">Static</th><th class="r">Adaptive</th><th>Decision</th><th>Outcome</th></tr></thead><tbody id="feed"></tbody></table></div>
+    <p class="empty" id="qempty">Press Start replay to stream transactions.</p>
+  </div>
+</section>
+
+<!-- SCORE -->
+<section class="view" id="score">
+  <div class="head"><div><span class="scope">Adaptive model · explains every decision</span><h1>Score a payment</h1><p>Enter a payment or load a case to see the decision and what drove it.</p></div></div>
+  <div class="grid g2">
+    <div class="card"><h2>Payment</h2><div class="chips" id="presets" style="margin-top:8px"></div>
+      <div class="row2"><div><label for="f_amount">Amount ($)</label><input type="number" id="f_amount" value="45"></div><div><label for="f_avg">Card's usual spend ($)</label><input type="number" id="f_avg" value="40"></div></div>
+      <div class="row2"><div><label for="f_merchant">Merchant</label><select id="f_merchant"></select></div><div><label for="f_channel">Channel</label><select id="f_channel"><option>pos</option><option>online</option><option>mobile</option><option>atm</option></select></div></div>
+      <div class="row2"><div><label for="f_home">Card home country</label><select id="f_home"></select></div><div><label for="f_country">Payment country</label><select id="f_country"></select></div></div>
+      <div class="row2"><div><label for="f_hour">Hour (0–23)</label><input type="number" id="f_hour" min="0" max="23" value="14"></div><div><label for="f_age">Account age (days)</label><input type="number" id="f_age" value="900"></div></div>
+      <div class="row2"><div><label for="f_1h">Card payments, last hour</label><input type="number" id="f_1h" value="0"></div><div><label for="f_24h">Card payments, last 24 h</label><input type="number" id="f_24h" value="1"></div></div>
+      <label class="chk"><input type="checkbox" id="f_dev"> Unrecognised device</label>
+      <button class="btn pri" style="margin-top:18px" id="scoreBtn">Score payment</button></div>
+    <div class="card" id="result"><h2>Decision</h2></div>
+  </div>
+</section>
+
+<!-- COST -->
+<section class="view" id="cost">
+  <div class="head"><div><span class="scope">Final period · adaptive model · review costs $5 per alert</span><h1>Threshold and cost</h1><p id="costFinding"></p></div></div>
+  <div class="grid g3">
+    <div class="card"><h2>Operating point</h2><p class="sub">Slide to trade missed fraud against false alarms.</p>
+      <label for="thr">Block threshold <b id="thv" style="color:var(--text)"></b></label><input type="range" id="thr" min="0" max="59" value="0">
+      <table style="margin-top:14px"><tbody id="thKpis"></tbody></table></div>
+    <div class="card span2"><h2>Total cost by threshold</h2><p class="sub">Missed fraud plus review cost, in dollars. The mark is your threshold.</p><div style="height:300px"><canvas id="costChart"></canvas></div></div>
+  </div>
+</section>
+
+<!-- FAIR -->
+<section class="view" id="fair">
+  <div class="head"><div><span class="scope">Drift-onset period · static model at production threshold</span><h1>Fairness</h1><p>False-positive rate is the customer-friction metric. Gaps between groups are a flag. Synthetic data: structure only, not a claim about real populations.</p></div></div>
+  <div class="card" style="max-width:760px"><table><thead><tr><th>Slice</th><th>Group</th><th class="r">Transactions</th><th class="r">False-positive rate</th><th class="r">Recall</th></tr></thead><tbody id="fairBody"></tbody></table></div>
+  <div class="card" style="max-width:760px;margin-top:var(--gap)"><h2>Responsible-use notes</h2><p class="sub" style="margin:8px 0 0;font-size:13px;line-height:1.6">No personal identifiers or protected attributes are features. Every block has a human-readable reason. Borderline scores go to manual review, not auto-decline. Labels arrive late in reality, so the retraining loop needs monitoring for label bias. Results are on synthetic data and overstate real-world separability.</p></div>
+</section>
+</main>
+
+<script>
+const $=s=>document.querySelector(s),fmt=n=>n.toLocaleString('en-US',{maximumFractionDigits:0}),usd=n=>'$'+n.toLocaleString('en-US',{maximumFractionDigits:0}),pct=(x,d=1)=>(x*100).toFixed(d)+'%';
+Chart.defaults.color='#8a8c92';Chart.defaults.borderColor='#222224';Chart.defaults.font.family='"Public Sans",system-ui,sans-serif';Chart.defaults.font.size=12;
+const noGrid={grid:{display:false},border:{display:false}}, yGrid={border:{display:false},grid:{color:'#222224',lineWidth:1},ticks:{maxTicksLimit:5}};
+let M,STREAM=[],charts={};
+const NAMES={account_takeover:'Account takeover',card_testing:'Card testing',night_cashout:'Night cash-out',drift_mobile_travel:'New: mobile travel'};
+
+function view(v){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id===v));document.querySelectorAll('.rail button').forEach(b=>b.toggleAttribute('aria-current',b.dataset.v===v)||b.removeAttribute('aria-current'));document.querySelectorAll('.rail button').forEach(b=>{if(b.dataset.v===v)b.setAttribute('aria-current','page')});window.scrollTo(0,0);Object.values(charts).forEach(c=>c.resize())}
+document.querySelectorAll('.rail button').forEach(b=>b.onclick=()=>view(b.dataset.v));
+
+(async()=>{
+ M=await (await fetch('/api/metrics')).json();STREAM=await (await fetch('/api/stream')).json();
+ const TH=M.threshold,s=M.test_b_static.at_threshold,a=M.test_b_adaptive.at_threshold,P=M.patterns.drift_mobile_travel;
+ // one variable per fact
+ const newN=P.n,newStatic=Math.round(P.static*P.n),newAdapt=Math.round(P.adaptive*P.n);
+ $('#finding').innerHTML=`<b>The new mobile-travel pattern slipped past the static model:</b> it flagged ${newStatic} of ${newN} (${pct(P.static,0)}). After retraining on the labels that arrived, the adaptive model flags ${newAdapt} of ${newN}.`;
+ const saved=1-a.total_cost/M.no_model_cost_b;
+ $('#kpis').innerHTML=[
+  ['Fraud caught','lead',pct(M.test_b_adaptive.recall_at_1pct_fpr),'',`Recall at a 1% false-alarm budget. Static model: ${pct(M.test_b_static.recall_at_1pct_fpr)}`],
+  ['PR-AUC',0,M.test_b_adaptive.pr_auc.toFixed(3),'',`Static ${M.test_b_static.pr_auc.toFixed(3)} · random ${M.test_b_adaptive.baseline_pr_auc.toFixed(3)}`],
+  ['Precision at threshold',0,pct(a.precision),'',`${a.fp} false alarms in ${fmt(a.tn+a.fp)} legitimate payments`],
+  ['Loss avoided',0,pct(saved),'',`${usd(a.fraud_stopped)} stopped · ${usd(a.total_cost)} total cost`]
+ ].map(k=>`<div class="kpi ${k[1]}"><div class="l">${k[0]}</div><div class="v">${k[2]}</div><div class="d">${k[4]}</div></div>`).join('');
+
+ const pk=Object.keys(M.patterns);
+ charts.pat=new Chart($('#patChart'),{type:'bar',data:{labels:pk.map(k=>NAMES[k]||k),datasets:[
+  {label:'Static',data:pk.map(k=>M.patterns[k].static*100),backgroundColor:'#8a8c92',barPercentage:.7,categoryPercentage:.7},
+  {label:'Adaptive',data:pk.map(k=>M.patterns[k].adaptive*100),backgroundColor:'#4a8ad6',barPercentage:.7,categoryPercentage:.7}]},
+  options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw.toFixed(0)}%`}}},scales:{x:noGrid,y:{...yGrid,min:0,max:100,ticks:{stepSize:25,callback:v=>v+'%'}}}}});
+ charts.pr=new Chart($('#prChart'),{type:'line',data:{datasets:[{data:M.pr_curve_b_adaptive.map(p=>({x:p[0],y:p[1]})),borderColor:'#4a8ad6',borderWidth:2,pointRadius:0,tension:0}]},
+  options:{maintainAspectRatio:false,parsing:false,plugins:{legend:{display:false}},scales:{x:{type:'linear',min:0,max:1,...noGrid,title:{display:true,text:'Recall'},ticks:{stepSize:.25}},y:{...yGrid,min:0,max:1.05,title:{display:true,text:'Precision'},ticks:{stepSize:.25,callback:v=>v>1?'':v}}}}});
+ const imp=M.importance.slice(0,7);
+ charts.imp=new Chart($('#impChart'),{type:'bar',data:{labels:imp.map(i=>i.label),datasets:[{data:imp.map(i=>i.importance),backgroundColor:'#f2f2f3',barThickness:8}]},
+  options:{indexAxis:'y',layout:{padding:{left:6}},maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{...yGrid,ticks:{maxTicksLimit:4}},y:noGrid}}});
+
+ // next alerts: highest adaptive scores among fraud/flagged
+ const flagged=STREAM.filter(t=>t.score_adaptive>=TH).sort((x,y)=>y.score_adaptive-x.score_adaptive).slice(0,5);
+ let reviewed=new Set();
+ const renderAlerts=()=>{$('#alerts').innerHTML=flagged.filter(t=>!reviewed.has(t.txn_id)).map(t=>`<li><div><b>${usd(t.amount)} · ${t.merchant_category.replace('_',' ')}</b><small>${t.channel} · ${t.country} · ${t.hour}:00</small></div><span class="pill p-block">${t.score_adaptive.toFixed(2)}</span><button class="lnk" data-r="${t.txn_id}">Review</button></li>`).join('')||`<li><span class="mut">Queue cleared. Nothing waiting.</span></li>`;
+  document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{reviewed.add(b.dataset.r);renderAlerts()})};
+ renderAlerts();$('#reviewNext').onclick=()=>{const n=flagged.find(t=>!reviewed.has(t.txn_id));if(n){reviewed.add(n.txn_id);renderAlerts()}};
+
+ // fairness
+ $('#fairBody').innerHTML=M.fairness.map(f=>`<tr><td>${f.slice==='channel'?'Channel':'Home country'}</td><td>${f.group}</td><td class="r">${fmt(f.n)}</td><td class="r">${pct(f.fpr,2)}</td><td class="r">${f.recall==null?'<span class="mut">–</span>':pct(f.recall,0)}</td></tr>`).join('');
+
+ // cost
+ const sw=M.sweep;$('#thr').max=sw.length-1;let best=0;sw.forEach((r,i)=>{if(r.total_cost<sw[best].total_cost)best=i});$('#thr').value=best;
+ $('#costFinding').textContent=`Cheapest operating point: threshold ${sw[best].threshold.toFixed(2)} at ${usd(sw[best].total_cost)}. Approving everything would cost ${usd(M.no_model_cost_b)} in missed fraud.`;
+ charts.cost=new Chart($('#costChart'),{type:'line',data:{labels:sw.map(r=>r.threshold.toFixed(2)),datasets:[
+  {label:'Total cost',data:sw.map(r=>r.total_cost),borderColor:'#f2f2f3',borderWidth:2,pointRadius:0,tension:0},
+  {label:'Selected',data:sw.map(()=>null),borderColor:'#4a8ad6',backgroundColor:'#4a8ad6',pointRadius:6,showLine:false}]},
+  options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{...noGrid,ticks:{maxTicksLimit:6},title:{display:true,text:'Threshold'}},y:{...yGrid,ticks:{maxTicksLimit:5,callback:v=>usd(v)}}}}});
+ const upd=()=>{const i=+$('#thr').value,r=sw[i];$('#thv').textContent=r.threshold.toFixed(3);
+  $('#thKpis').innerHTML=[['Fraud stopped',usd(r.fraud_stopped)],['Fraud missed',usd(r.fraud_missed)],['False alarms',`${r.fp} · ${pct(r.fpr,2)}`],['Recall',pct(r.recall,1)],['Precision',pct(r.precision,1)],['Total cost',usd(r.total_cost)]].map(k=>`<tr><td class="mut">${k[0]}</td><td class="r">${k[1]}</td></tr>`).join('');
+  charts.cost.data.datasets[1].data=sw.map((x,j)=>j===i?x.total_cost:null);charts.cost.update('none')};
+ $('#thr').oninput=upd;upd();
+
+ // simulator
+ const merchants=['grocery','fuel','restaurant','travel','electronics','gift_cards','crypto','online_retail','pharmacy','utilities'],ctry=['US','GB','DE','IN','BR','NG','RU','CN'];
+ $('#f_merchant').innerHTML=merchants.map(m=>`<option>${m}</option>`).join('');$('#f_home').innerHTML=$('#f_country').innerHTML=ctry.map(m=>`<option>${m}</option>`).join('');
+ const C={'Weekly groceries':{amount:38,avg:40,merchant:'grocery',channel:'pos',home:'US',country:'US',hour:17,age:1200,h1:0,h24:1,dev:0},
+  'Account takeover':{amount:620,avg:55,merchant:'electronics',channel:'online',home:'US',country:'NG',hour:3,age:600,h1:1,h24:2,dev:1},
+  'Card testing':{amount:1.5,avg:40,merchant:'gift_cards',channel:'online',home:'GB',country:'GB',hour:13,age:300,h1:9,h24:14,dev:0},
+  'New mobile-travel pattern':{amount:540,avg:60,merchant:'travel',channel:'mobile',home:'US',country:'BR',hour:15,age:12,h1:0,h24:1,dev:0},
+  'Holiday spend, legitimate':{amount:180,avg:70,merchant:'travel',channel:'online',home:'US',country:'DE',hour:11,age:2000,h1:0,h24:1,dev:0}};
+ $('#presets').innerHTML=Object.keys(C).map(k=>`<button class="chip">${k}</button>`).join('');
+ document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{const p=C[c.textContent];$('#f_amount').value=p.amount;$('#f_avg').value=p.avg;$('#f_merchant').value=p.merchant;$('#f_channel').value=p.channel;$('#f_home').value=p.home;$('#f_country').value=p.country;$('#f_hour').value=p.hour;$('#f_age').value=p.age;$('#f_1h').value=p.h1;$('#f_24h').value=p.h24;$('#f_dev').checked=!!p.dev;$('#scoreBtn').click()});
+ $('#scoreBtn').onclick=async()=>{
+  const body={amount:+$('#f_amount').value,card_avg_spend:+$('#f_avg').value,merchant_category:$('#f_merchant').value,channel:$('#f_channel').value,card_home_country:$('#f_home').value,country:$('#f_country').value,hour:+$('#f_hour').value,account_age_days:+$('#f_age').value,txn_1h:+$('#f_1h').value,txn_24h:+$('#f_24h').value,new_device:$('#f_dev').checked};
+  const r=await (await fetch('/api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  const mx=Math.max(...r.reasons.map(x=>Math.abs(x.impact)),.01),verb={block:'Block',review:'Send to review',approve:'Approve'}[r.decision];
+  $('#result').innerHTML=`<h2>Decision</h2><div style="display:flex;align-items:center;gap:14px;margin-top:10px"><span class="big">${verb}</span><span class="pill p-${r.decision}">${r.decision}</span></div>
+   <div class="meter"><div class="fill" style="width:${Math.min(r.score,1)*100}%"></div><i style="left:${r.threshold*100}%"></i><b style="left:${r.threshold*100}%">Block at ${r.threshold.toFixed(2)}</b></div>
+   <p class="sub">Risk score ${r.score.toFixed(3)}</p>
+   <h2 style="margin-top:22px">What drove it</h2><p class="sub">Change in log-odds if the factor were neutral. Positive pushes toward fraud.</p>
+   ${r.reasons.length?r.reasons.map(x=>`<div class="why"><span>${x.label}</span><div class="bar"><div style="width:${Math.abs(x.impact)/mx*100}%"></div></div><span class="r">${x.impact>0?'+':'−'}${Math.abs(x.impact).toFixed(2)}</span></div>`).join(''):'<p class="mut">No notable risk factors.</p>'}`};
+ $('#scoreBtn').click();
+
+ // queue
+ let i=0,timer=null,filter='all',rows=[];
+ const dec=s=>s>=TH?'<span class="pill p-block">Block</span>':s>=TH*.6?'<span class="pill p-review">Review</span>':'<span class="pill p-approve">Approve</span>';
+ const rowHtml=t=>`<tr><td>${t.txn_id}</td><td class="r">${usd(t.amount).replace(/^\$/,'$')}${t.amount<10?'':''}</td><td>${t.merchant_category.replace('_',' ')}</td><td>${t.channel}</td><td>${t.country}</td><td class="r">${t.score_static.toFixed(2)}</td><td class="r">${t.score_adaptive.toFixed(2)}</td><td>${dec(t.score_adaptive)}</td><td>${t.is_fraud?(t.score_static<TH?'<span class="pill p-block">Fraud, missed by static</span>':'<span class="pill p-neu">Fraud</span>'):'<span class="mut">–</span>'}</td></tr>`;
+ const draw=()=>{const v=rows.filter(t=>filter==='all'||(filter==='fraud'&&t.is_fraud)||(filter==='missed'&&t.is_fraud&&t.score_static<TH));$('#feed').innerHTML=v.slice().reverse().map(rowHtml).join('');$('#qempty').style.display=v.length?'none':'block';
+  const f=rows.filter(t=>t.is_fraud),cs=f.filter(t=>t.score_static>=TH).length,ca=f.filter(t=>t.score_adaptive>=TH).length;
+  if(rows.length)$('#qsub').textContent=`${rows.length} replayed · fraud caught ${cs} of ${f.length} by the static model, ${ca} of ${f.length} by the adaptive model`};
+ const step=()=>{if(i>=STREAM.length){clearInterval(timer);timer=null;$('#play').textContent='Replay';return}rows.push(STREAM[i++]);draw()};
+ $('#play').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('#play').textContent='Resume';return}if(i>=STREAM.length){i=0;rows=[]}timer=setInterval(step,160);$('#play').textContent='Pause'};
+ $('#reset').onclick=()=>{clearInterval(timer);timer=null;i=0;rows=[];draw();$('#qempty').textContent='Press Start replay to stream transactions.';$('#qsub').textContent='Replay the stream and watch both models decide on each payment.';$('#play').textContent='Start replay'};
+ document.querySelectorAll('#qtabs button').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('#qtabs button').forEach(x=>x.setAttribute('aria-selected',x===b));draw();if(!rows.length)$('#qempty').textContent='Press Start replay to stream transactions.';else if(!$('#feed').children.length)$('#qempty').textContent='Nothing matches this filter yet.'});
+ draw();
+})();
+</script>
+</body>
+</html>

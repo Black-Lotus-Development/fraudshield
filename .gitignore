@@ -1,0 +1,4 @@
+*.log
+.taste-skill/
+__pycache__/
+data/
