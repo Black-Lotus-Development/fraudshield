@@ -111,7 +111,7 @@ for col in ("channel", "card_home_country"):
 # ---- exports ----
 down = lambda p, r: [[round(float(a), 4), round(float(b), 4)] for a, b in
                      list(zip(r, p))[:: max(len(p) // 150, 1)]]
-tb_df = df.iloc[tb].copy(); tb_df["score_static"] = s_b_static; tb_df["score_adaptive"] = s_b_adapt
+tb_df = pd.concat([df.iloc[tb], X.iloc[tb].add_prefix("f_")], axis=1); tb_df["score_static"] = s_b_static; tb_df["score_adaptive"] = s_b_adapt
 stream = pd.concat([tb_df[tb_df.is_fraud == 1].sample(min(40, int(tb_df.is_fraud.sum())), random_state=1),
                     tb_df[tb_df.is_fraud == 0].sample(160, random_state=1)]).sort_values("timestamp")
 stream.to_csv("artifacts/stream.csv", index=False)

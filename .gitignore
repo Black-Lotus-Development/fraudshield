@@ -2,3 +2,4 @@
 .taste-skill/
 __pycache__/
 data/
+artifacts/reviews.json*

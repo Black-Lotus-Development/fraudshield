@@ -9,6 +9,18 @@ python train.py     # generates data, trains, validates, writes artifacts/
 python app.py       # dashboard at http://localhost:5050
 ```
 
+## What you can do in the dashboard
+- **Overview:** headline finding, KPIs, recall by fraud typology (static vs adaptive), PR curve, feature importance.
+- **Alert queue:** every flagged payment, filterable (needs review, all, missed by static model, reviewed). Open one to see why it was flagged and record a verdict (confirm fraud / mark legitimate); verdicts persist in `artifacts/reviews.json` and the queue advances to the next alert.
+- **Score a payment:** enter any payment (or load a preset case) and get approve / review / block with a per-feature explanation. Inputs are validated server-side with errors shown next to each field.
+- **Threshold and cost:** move the block threshold and watch fraud stopped, false alarms and total cost update.
+- **Fairness:** false-positive rate and recall by channel and home country.
+
+Every view has its own URL (`#queue`, `#score`, …) and the back button works.
+
+## API
+`GET /api/metrics` · `GET /api/stream` · `GET /api/explain/<txn_id>` · `POST /api/review/<txn_id>` `{verdict: "fraud"|"legit"|null}` · `POST /api/score`
+
 ## Approach
 - **Data:** synthetic 80k-transaction / 60-day portfolio, 1.6% fraud, four typologies (account takeover, card testing, night cash-out, and a *new* mobile-travel pattern that only appears in the last quarter). Synthetic by necessity — no real payment data was available, so absolute scores overstate real-world separability.
 - **Features (causal only):** per-card velocity (1h/24h), amount vs. card's running average, geo mismatch, device, merchant risk, hour, account age.

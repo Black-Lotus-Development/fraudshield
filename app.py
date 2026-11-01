@@ -1,32 +1,90 @@
 """FraudShield API + dashboard.  Run: python app.py  ->  http://localhost:5050"""
 import json
+import math
+import os
+import threading
+import time
+
 import joblib
 import pandas as pd
 from flask import Flask, jsonify, request, send_from_directory
 
-from fraud_model import MERCHANT_RISK, CATS, FEATURES, row_features  # noqa: F401
+from fraud_model import CATS, FEATURES, row_features
 
 app = Flask(__name__, static_folder="static")
 bundle = joblib.load("artifacts/model.joblib")
 MODEL, TH, BASE = bundle["model"], bundle["threshold"], bundle["baseline"]
 METRICS = json.load(open("artifacts/metrics.json"))
 STREAM = pd.read_csv("artifacts/stream.csv")
+BY_ID = {r["txn_id"]: r for r in STREAM.to_dict("records")}
+REVIEW_FILE = "artifacts/reviews.json"
+_lock = threading.Lock()
+COUNTRIES = ["US", "GB", "DE", "IN", "BR", "NG", "RU", "CN"]
+
+
+def load_reviews():
+    try:
+        return json.load(open(REVIEW_FILE))
+    except (OSError, ValueError):
+        return {}
+
+
+REVIEWS = load_reviews()
+
+
+def decide(score: float) -> str:
+    return "block" if score >= TH else ("review" if score >= TH * 0.6 else "approve")
+
+
+def validate(t: dict):
+    """Return (clean dict, errors by field). Errors use the form's own field names."""
+    errs, out = {}, {}
+
+    def num(key, lo, hi, default, integer=False):
+        v = t.get(key, default)
+        try:
+            v = float(v)
+            if math.isnan(v) or v < lo or v > hi or (integer and v != int(v)):
+                raise ValueError
+        except (TypeError, ValueError):
+            errs[key] = f"Enter a {'whole ' if integer else ''}number from {lo:,} to {hi:,}."
+            return default
+        return int(v) if integer else v
+
+    out["amount"] = num("amount", 0.01, 1_000_000, 50)
+    out["card_avg_spend"] = num("card_avg_spend", 0.01, 1_000_000, 40)
+    out["hour"] = num("hour", 0, 23, 12, True)
+    out["account_age_days"] = num("account_age_days", 0, 36500, 800, True)
+    out["txn_1h"] = num("txn_1h", 0, 500, 0, True)
+    out["txn_24h"] = num("txn_24h", 0, 5000, 0, True)
+    if "txn_1h" not in errs and "txn_24h" not in errs and out["txn_24h"] < out["txn_1h"]:
+        errs["txn_24h"] = "Can't be fewer than the payments in the last hour."
+    for key, allowed in (("merchant_category", CATS["merchant_category"]), ("channel", CATS["channel"]),
+                         ("country", COUNTRIES), ("card_home_country", COUNTRIES)):
+        v = t.get(key)
+        if v not in allowed:
+            errs[key] = "Choose an option from the list."
+        out[key] = v if v in allowed else allowed[0]
+    out["new_device"] = int(bool(t.get("new_device", False)))
+    return out, errs
 
 
 def to_features(t: dict) -> pd.DataFrame:
-    """Build one feature row from a user-entered transaction."""
-    df = pd.DataFrame([{
-        "amount": float(t.get("amount", 50)), "merchant_category": t.get("merchant_category", "grocery"),
-        "channel": t.get("channel", "pos"), "country": t.get("country", "US"),
-        "card_home_country": t.get("card_home_country", "US"), "hour": int(t.get("hour", 12)),
-        "new_device": int(bool(t.get("new_device", 0))), "account_age_days": int(t.get("account_age_days", 800)),
-    }])
+    df = pd.DataFrame([{k: t[k] for k in ("amount", "merchant_category", "channel", "country",
+                                          "card_home_country", "hour", "new_device", "account_age_days")}])
     f = row_features(df)
-    avg = max(float(t.get("card_avg_spend", 40)), 1)
-    f["log_amount"] = pd.Series([__import__("math").log1p(df.amount[0])])
-    f["amount_vs_card_avg"] = df.amount[0] / avg
-    f["txn_1h"] = float(t.get("txn_1h", 0)); f["txn_24h"] = float(t.get("txn_24h", 0))
+    f["log_amount"] = math.log1p(t["amount"])
+    f["amount_vs_card_avg"] = t["amount"] / max(t["card_avg_spend"], 1)
+    f["txn_1h"], f["txn_24h"] = float(t["txn_1h"]), float(t["txn_24h"])
     return f[FEATURES]
+
+
+def public_row(r: dict) -> dict:
+    keys = ("txn_id", "amount", "merchant_category", "channel", "country", "card_home_country", "hour",
+            "new_device", "account_age_days", "is_fraud", "pattern", "score_static", "score_adaptive")
+    out = {k: r[k] for k in keys}
+    out["review"] = REVIEWS.get(r["txn_id"])
+    return out
 
 
 @app.get("/")
@@ -41,19 +99,52 @@ def metrics():
 
 @app.post("/api/score")
 def score():
-    X = to_features(request.get_json(force=True))
-    s, why = MODEL.explain(X, BASE)
-    decision = "block" if s >= TH else ("review" if s >= TH * 0.6 else "approve")
-    return jsonify({"score": s, "threshold": TH, "decision": decision, "reasons": why})
+    clean, errs = validate(request.get_json(silent=True) or {})
+    if errs:
+        return jsonify({"error": "Some fields need fixing.", "fields": errs}), 400
+    s, why = MODEL.explain(to_features(clean), BASE)
+    return jsonify({"score": s, "threshold": TH, "decision": decide(s), "reasons": why})
 
 
 @app.get("/api/stream")
 def stream():
-    rows = STREAM.to_dict("records")
-    return jsonify([{k: r[k] for k in ("txn_id", "amount", "merchant_category", "channel", "country",
-                                       "card_home_country", "hour", "is_fraud", "pattern",
-                                       "score_static", "score_adaptive")} for r in rows])
+    return jsonify([public_row(r) for r in BY_ID.values()])
+
+
+@app.get("/api/explain/<txn_id>")
+def explain(txn_id):
+    r = BY_ID.get(txn_id)
+    if r is None:
+        return jsonify({"error": f"No transaction {txn_id} in this sample."}), 404
+    X = pd.DataFrame([{f: r["f_" + f] for f in FEATURES}])
+    s, why = MODEL.explain(X, BASE)
+    return jsonify({**public_row(r), "score": s, "threshold": TH, "decision": decide(s), "reasons": why})
+
+
+@app.post("/api/review/<txn_id>")
+def review(txn_id):
+    if txn_id not in BY_ID:
+        return jsonify({"error": f"No transaction {txn_id} in this sample."}), 404
+    verdict = (request.get_json(silent=True) or {}).get("verdict")
+    if verdict not in ("fraud", "legit", None):
+        return jsonify({"error": "Verdict must be 'fraud' or 'legit'."}), 400
+    with _lock:
+        if verdict is None:
+            REVIEWS.pop(txn_id, None)
+        else:
+            REVIEWS[txn_id] = {"verdict": verdict, "at": int(time.time())}
+        tmp = REVIEW_FILE + ".tmp"
+        json.dump(REVIEWS, open(tmp, "w"))
+        os.replace(tmp, REVIEW_FILE)
+    return jsonify(public_row(BY_ID[txn_id]))
+
+
+@app.errorhandler(404)
+def not_found(_):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory("static", "index.html")
 
 
 if __name__ == "__main__":
-    app.run(port=5050, debug=False)
+    app.run(port=int(os.environ.get("PORT", 5050)), debug=False)
