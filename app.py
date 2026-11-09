@@ -11,13 +11,18 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from fraud_model import CATS, FEATURES, row_features
 
-app = Flask(__name__, static_folder="static")
-bundle = joblib.load("artifacts/model.joblib")
+HERE = os.path.dirname(os.path.abspath(__file__))
+ART = os.path.join(HERE, "artifacts")
+STATIC = os.path.join(HERE, "static")
+
+app = Flask(__name__, static_folder=STATIC)
+bundle = joblib.load(os.path.join(ART, "model.joblib"))
 MODEL, TH, BASE = bundle["model"], bundle["threshold"], bundle["baseline"]
-METRICS = json.load(open("artifacts/metrics.json"))
-STREAM = pd.read_csv("artifacts/stream.csv")
+METRICS = json.load(open(os.path.join(ART, "metrics.json")))
+STREAM = pd.read_csv(os.path.join(ART, "stream.csv"))
 BY_ID = {r["txn_id"]: r for r in STREAM.to_dict("records")}
-REVIEW_FILE = "artifacts/reviews.json"
+# Serverless hosts (Vercel) only allow writes under /tmp, so verdicts live there and reset on cold starts.
+REVIEW_FILE = os.environ.get("REVIEW_FILE") or ("/tmp/reviews.json" if os.environ.get("VERCEL") else os.path.join(ART, "reviews.json"))
 _lock = threading.Lock()
 COUNTRIES = ["US", "GB", "DE", "IN", "BR", "NG", "RU", "CN"]
 
@@ -89,7 +94,7 @@ def public_row(r: dict) -> dict:
 
 @app.get("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(STATIC, "index.html")
 
 
 @app.get("/api/metrics")
@@ -143,7 +148,7 @@ def review(txn_id):
 def not_found(_):
     if request.path.startswith("/api/"):
         return jsonify({"error": "Not found"}), 404
-    return send_from_directory("static", "index.html")
+    return send_from_directory(STATIC, "index.html")
 
 
 if __name__ == "__main__":

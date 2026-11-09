@@ -2,8 +2,22 @@
 
 Real-time fraud scoring with low false positives, drift adaptation and cost-aware decisions.
 
+**Live demo:** https://fraudshield-beta-livid.vercel.app · **Slides:** [docs/FraudShield-DN-FN-01.pptx](docs/FraudShield-DN-FN-01.pptx) · Built solo by KingDavid.
+
+![Overview](docs/overview.png)
+
+## Results (final, unseen period)
+| | Static model | FraudShield (adaptive) |
+|---|---|---|
+| Fraud caught (recall) | 30.1% | **99.2%** |
+| Precision | 79.3% | **92.2%** |
+| False alarms | 28 of 9,644 | 30 of 9,644 (0.31%) |
+| Recall on the new mobile-travel pattern | 1.6% | **100%** |
+| Total cost (missed fraud + $5/review) | $45,186 | **$310** |
+
 ## Run
 ```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python train.py     # generates data, trains, validates, writes artifacts/
 python app.py       # dashboard at http://localhost:5050
@@ -32,3 +46,6 @@ Every view has its own URL (`#queue`, `#score`, …) and the back button works.
 
 ## Caveats
 Single synthetic dataset, one random seed; the drift scenario is constructed, so the adaptive model's near-perfect recall on it should be read as a demonstration of the retraining loop, not a benchmark.
+
+## Deploy
+Deployed on Vercel as a Python (Flask) function: `vercel deploy --prod`. The trained model in `artifacts/` is committed, so nothing trains at build time. On Vercel, reviewer verdicts are kept in `/tmp` and reset when the function restarts.
